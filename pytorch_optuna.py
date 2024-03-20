@@ -27,7 +27,7 @@ import time
 start_time = time.time()
 
 # data preparation
-data_js = json.loads(session.query(AnalysisMLP).filter_by(id=2).first().data)
+data_js = json.loads(session.query(AnalysisMLP).filter_by(id=7).first().data)
 data = pd.DataFrame(data_js)
 data['mark'] = data['mark'].replace({'empty': 0, 'bitum': 1})
 data['mark'] = data['mark'].replace({'пусто': 0, 'нефть': 1})
@@ -39,6 +39,8 @@ output_cols = ['mark']
 def dataframe_to_arrays(data):
     df = data.copy(deep=True)
     input_array = df[input_cols].to_numpy()
+    input_scaler = StandardScaler()
+    input_array = input_scaler.fit_transform(input_array)
     target_array = df[output_cols].to_numpy()
     return input_array, target_array
 
@@ -100,6 +102,7 @@ def fit(learning_rate, num_hidden_units, dropout_rate, weight_decay, trial, n_sp
         epoch_losses = []
         for xb, yb in train_dl:
             pred = model(xb)
+            # pred = torch.sigmoid(pred)  # Применяем сигмоидную функцию активации к предсказанным значениям
             loss = loss_function(pred, yb)
 
             l2_lambda = 0.001
@@ -112,7 +115,7 @@ def fit(learning_rate, num_hidden_units, dropout_rate, weight_decay, trial, n_sp
             optimizer.step()
             optimizer.zero_grad()
             epoch_losses.append(loss.item())
-        epoch_loss = sum(epoch_losses) / len(epoch_losses)
+        epoch_loss = sum(epoch_losses) / len(epoch_losses)  # Вычисляем среднюю потерю для текущей эпохи
         losses.append(epoch_loss)
         print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.7f}')
         trial.report(epoch_loss, epoch)
@@ -124,13 +127,18 @@ def fit(learning_rate, num_hidden_units, dropout_rate, weight_decay, trial, n_sp
     # Список для хранения всех прогнозов
     all_predictions = []
     all_targets = []
+    # Проходим по DataLoader и делаем прогнозы
     with torch.no_grad():
         for xb, yb in val_dl:
+            # Получаем прогнозы от модели
             predictions = model(xb)
+            # Добавляем прогнозы в общий список
             all_predictions.append(predictions)
             all_targets.append(yb)
+    # Объединяем все прогнозы в один тензор
     all_predictions = torch.cat(all_predictions, dim=0)
     all_targets = torch.cat(all_targets, dim=0)
+    # Преобразуем тензор прогнозов в массив NumPy, если нужно
     predictions_numpy = all_predictions.numpy()
     targets_numpy = all_targets.numpy()
     binary_predictions = (predictions_numpy >= 0.5).astype(int)
@@ -140,7 +148,7 @@ def fit(learning_rate, num_hidden_units, dropout_rate, weight_decay, trial, n_sp
 
 def objective(trial):
     learning_rate = trial.suggest_float('learning_rate', 0.0001, 0.1, log=True)
-    num_hidden_units = [trial.suggest_int(f'num_hidden_units_layer{i}', 20, 50) for i in range(1, 5)]
+    num_hidden_units = [trial.suggest_int(f'num_hidden_units_layer{i}', 20, 50) for i in range(1, 7)]
     dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.9)
     weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
 
@@ -150,10 +158,11 @@ def objective(trial):
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+# study = optuna.create_study(direction='maximize')
 study = optuna.create_study(direction='maximize',
     pruner=optuna.pruners.MedianPruner(
-        n_startup_trials=5, n_warmup_steps=20, interval_steps=2
-    ), sampler=optuna.samplers.RandomSampler(seed=42))
+        n_startup_trials=2, n_warmup_steps=20, interval_steps=1
+    ), sampler=optuna.samplers.RandomSampler(seed=10))
 study.optimize(objective, n_trials=50)
 
 print("Number of finished trials:", len(study.trials))
@@ -166,7 +175,7 @@ for key, value in trial.params.items():
     print(f"    {key}: {value}")
 
 best_learning_rate = trial.params['learning_rate']
-best_num_hidden_units = [trial.params[f'num_hidden_units_layer{i}'] for i in range(1, 5)]
+best_num_hidden_units = [trial.params[f'num_hidden_units_layer{i}'] for i in range(1, 7)]
 best_dropout_rate = trial.params['dropout_rate']
 best_weight_decay = trial.params['weight_decay']
 
@@ -174,7 +183,7 @@ final_model = Model(input_dim, output_dim, best_num_hidden_units, best_dropout_r
 optimizer = torch.optim.Adam(final_model.parameters(), lr=best_learning_rate, weight_decay=best_weight_decay)
 loss_function = torch.nn.BCEWithLogitsLoss()
 
-epochs = 150
+epochs = 250
 best_loss = float('inf')
 patience = 20
 losses = []
@@ -184,6 +193,7 @@ for epoch in range(epochs):
     epoch_losses = []
     for xb, yb in train_dl:
         pred = final_model(xb)
+        # pred = torch.sigmoid(pred)
         loss = loss_function(pred, yb)
 
         l2_lambda = 0.001
@@ -199,14 +209,18 @@ for epoch in range(epochs):
     losses.append(np.mean(epoch_losses))
 
     final_model.eval()
-
+    # Список для хранения всех прогнозов
     all_predictions = []
     all_targets = []
     epoch_val = []
+    # Проходим по DataLoader и делаем прогнозы
     with torch.no_grad():
         for xb, yb in val_dl:
+            # Получаем прогнозы от модели
             predictions = final_model(xb)
+            # predictions = torch.sigmoid(predictions)
             val_loss = loss_function(predictions, yb)
+            # Добавляем прогнозы в общий список
             all_predictions.append(predictions)
             all_targets.append(yb)
             epoch_val.append(val_loss)
@@ -219,7 +233,6 @@ for epoch in range(epochs):
     if trial.should_prune():
         print(f'    VAL Epoch [{epoch + 1}/{epochs}], Trial pruned by optuna')
         raise optuna.TrialPruned()
-    
     # early stopping
     if val_loss < best_loss:
         best_loss = val_loss
@@ -230,11 +243,19 @@ for epoch in range(epochs):
             print(f"     Epoch [{epoch+1}/{epochs}] Early stopping")
             break
 
+# Объединяем все прогнозы в один тензор
 all_predictions = torch.cat(all_predictions, dim=0)
 all_targets = torch.cat(all_targets, dim=0)
+# Преобразуем тензор прогнозов в массив NumPy, если нужно
 predictions_numpy = all_predictions.numpy()
 targets_numpy = all_targets.numpy()
-binary_predictions = (predictions_numpy >= 0.5).astype(int)
+
+fpr, tpr, thresholds = roc_curve(targets_numpy, predictions_numpy)
+optimal_threshold = thresholds[np.argmax(tpr - fpr)]
+roc_auc = auc(fpr, tpr)
+print('optimal_threshold: ', optimal_threshold)
+
+binary_predictions = (predictions_numpy >= optimal_threshold).astype(int)
 
 matches = 0
 for i in range(len(binary_predictions)):
@@ -243,12 +264,13 @@ for i in range(len(binary_predictions)):
 print(f"Количество совпадений: {matches} / {len(binary_predictions)}, {matches / len(binary_predictions) * 100:.2f}%")
 
 accuracy = accuracy_score(targets_numpy, binary_predictions)
+precision = precision_score(targets_numpy, binary_predictions, zero_division='warn')
+recall = recall_score(targets_numpy, binary_predictions, zero_division='warn')
 f1 = f1_score(targets_numpy, binary_predictions, zero_division='warn')
-fpr, tpr, thresholds = roc_curve(targets_numpy, binary_predictions)
-roc_auc = auc(fpr, tpr)
-
 
 print(f'Accuracy: {accuracy:.4f}')
+print(f'Precision: {precision:.4f}')
+print(f'Recall: {recall:.4f}')
 print(f'F1-Score: {f1:.4f}')
 
 print("Время выполнения программы:", time.time() - start_time, "секунд")
