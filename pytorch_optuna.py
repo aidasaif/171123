@@ -102,7 +102,6 @@ def fit(learning_rate, num_hidden_units, dropout_rate, weight_decay, trial, n_sp
         epoch_losses = []
         for xb, yb in train_dl:
             pred = model(xb)
-            # pred = torch.sigmoid(pred)  # Применяем сигмоидную функцию активации к предсказанным значениям
             loss = loss_function(pred, yb)
 
             l2_lambda = 0.001
@@ -115,7 +114,7 @@ def fit(learning_rate, num_hidden_units, dropout_rate, weight_decay, trial, n_sp
             optimizer.step()
             optimizer.zero_grad()
             epoch_losses.append(loss.item())
-        epoch_loss = sum(epoch_losses) / len(epoch_losses)  # Вычисляем среднюю потерю для текущей эпохи
+        epoch_loss = sum(epoch_losses) / len(epoch_losses)
         losses.append(epoch_loss)
         print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.7f}')
         trial.report(epoch_loss, epoch)
@@ -124,21 +123,15 @@ def fit(learning_rate, num_hidden_units, dropout_rate, weight_decay, trial, n_sp
             raise optuna.TrialPruned()
 
     model.eval()
-    # Список для хранения всех прогнозов
     all_predictions = []
     all_targets = []
-    # Проходим по DataLoader и делаем прогнозы
     with torch.no_grad():
         for xb, yb in val_dl:
-            # Получаем прогнозы от модели
             predictions = model(xb)
-            # Добавляем прогнозы в общий список
             all_predictions.append(predictions)
             all_targets.append(yb)
-    # Объединяем все прогнозы в один тензор
     all_predictions = torch.cat(all_predictions, dim=0)
     all_targets = torch.cat(all_targets, dim=0)
-    # Преобразуем тензор прогнозов в массив NumPy, если нужно
     predictions_numpy = all_predictions.numpy()
     targets_numpy = all_targets.numpy()
     binary_predictions = (predictions_numpy >= 0.5).astype(int)
@@ -157,8 +150,6 @@ def objective(trial):
 
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
-
-# study = optuna.create_study(direction='maximize')
 study = optuna.create_study(direction='maximize',
     pruner=optuna.pruners.MedianPruner(
         n_startup_trials=2, n_warmup_steps=20, interval_steps=1
@@ -193,7 +184,6 @@ for epoch in range(epochs):
     epoch_losses = []
     for xb, yb in train_dl:
         pred = final_model(xb)
-        # pred = torch.sigmoid(pred)
         loss = loss_function(pred, yb)
 
         l2_lambda = 0.001
@@ -209,18 +199,13 @@ for epoch in range(epochs):
     losses.append(np.mean(epoch_losses))
 
     final_model.eval()
-    # Список для хранения всех прогнозов
     all_predictions = []
     all_targets = []
     epoch_val = []
-    # Проходим по DataLoader и делаем прогнозы
     with torch.no_grad():
         for xb, yb in val_dl:
-            # Получаем прогнозы от модели
             predictions = final_model(xb)
-            # predictions = torch.sigmoid(predictions)
             val_loss = loss_function(predictions, yb)
-            # Добавляем прогнозы в общий список
             all_predictions.append(predictions)
             all_targets.append(yb)
             epoch_val.append(val_loss)
@@ -243,10 +228,8 @@ for epoch in range(epochs):
             print(f"     Epoch [{epoch+1}/{epochs}] Early stopping")
             break
 
-# Объединяем все прогнозы в один тензор
 all_predictions = torch.cat(all_predictions, dim=0)
 all_targets = torch.cat(all_targets, dim=0)
-# Преобразуем тензор прогнозов в массив NumPy, если нужно
 predictions_numpy = all_predictions.numpy()
 targets_numpy = all_targets.numpy()
 
@@ -293,7 +276,6 @@ plt.title('Val Loss vs Epochs')
 plt.legend()
 plt.show()
 
-# Строим ROC-кривую
 plt.figure()
 plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
 plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
@@ -305,4 +287,3 @@ plt.title('Receiver Operating Characteristic (ROC) Curve')
 plt.legend(loc="lower right")
 plt.show()
 
-#
